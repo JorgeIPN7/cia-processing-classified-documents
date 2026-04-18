@@ -22,7 +22,9 @@ export default tseslint.config(
         ...globals.jest,
       },
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: ['test/e2e/*.ts'],
+        },
         tsconfigRootDir: __dirname,
       },
     },
@@ -38,6 +40,18 @@ export default tseslint.config(
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
       // NestJS modules are intentionally empty classes decorated with @Module(); the metadata lives on the decorator, not the class body.
       '@typescript-eslint/no-extraneous-class': 'off',
+    },
+  },
+  {
+    // Test frameworks (Jest matchers, mocks) and supertest return `any` at their API boundaries.
+    // Relaxing the unsafe-* rules for test files keeps assertions readable without allowing `any` in production code.
+    files: ['**/*.spec.ts', 'test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
     },
   },
 );

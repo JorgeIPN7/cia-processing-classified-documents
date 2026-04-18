@@ -3,6 +3,7 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
+    "resolvePackageJsonExports": false,
     "rootDir": ".",
     "types": ["jest", "node"]
   },
