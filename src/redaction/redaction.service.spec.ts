@@ -151,6 +151,47 @@ describe('RedactionService', () => {
     });
   });
 
+  describe('redact — at-limit boundaries', () => {
+    it(
+      'accepts a document at exactly MAX_DOCUMENT_BYTES',
+      () => {
+        const atLimit = 'a'.repeat(LIMITS.MAX_DOCUMENT_BYTES);
+        const r = service.redact(atLimit, 'beer');
+        assertOk(r);
+        expect(r.value.stats.documentBytes).toBe(LIMITS.MAX_DOCUMENT_BYTES);
+        expect(r.value.stats.matchCount).toBe(0);
+      },
+      60_000,
+    );
+
+    it(
+      'accepts patterns input at exactly MAX_PATTERNS_INPUT_BYTES',
+      () => {
+        const L = LIMITS.MAX_PATTERN_LENGTH;
+        const target = LIMITS.MAX_PATTERNS_INPUT_BYTES;
+        const fullCount = Math.floor((target + 1) / (L + 1));
+        const idxWidth = String(fullCount).length;
+        const parts: string[] = [];
+        for (let i = 0; i < fullCount; i++) {
+          const idx = String(i).padStart(idxWidth, '0');
+          parts.push(`p${idx}${'a'.repeat(L - 1 - idxWidth)}`);
+        }
+        const baseLen = fullCount * L + (fullCount - 1);
+        const tailLen = target - baseLen - 1;
+        if (tailLen > 0) {
+          parts.push(`z${'y'.repeat(tailLen - 1)}`);
+        }
+        const input = parts.join(',');
+        expect(input.length).toBe(target);
+
+        const r = service.redact('no matches in this short text', input);
+        assertOk(r);
+        expect(r.value.stats.matchCount).toBe(0);
+      },
+      60_000,
+    );
+  });
+
   describe('unredact — happy paths (round-trip)', () => {
     it('round-trips the canonical example', () => {
       const text = 'I love Cheese Pizza and beer at Boston Red Sox games';

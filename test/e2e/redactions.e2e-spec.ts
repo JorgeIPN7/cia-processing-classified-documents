@@ -168,4 +168,51 @@ describe('Redactions (e2e)', () => {
       },
     });
   });
+
+  it(
+    'POST /redactions — VALIDATION_ERROR when patterns exceeds MAX_PATTERNS_INPUT_BYTES (DTO @MaxLength)',
+    async () => {
+      const oversized = 'a'.repeat(LIMITS.MAX_PATTERNS_INPUT_BYTES + 1);
+      const res = await request(app.getHttpServer())
+        .post('/redactions')
+        .send({ text: 'hello', patterns: oversized })
+        .expect(400);
+
+      expect(res.body).toMatchObject({
+        error: {
+          code: 'VALIDATION_ERROR',
+          kind: 'VALIDATION_ERROR',
+        },
+      });
+      expect(Array.isArray(res.body.error.details)).toBe(true);
+      expect(res.body.error.details.join(' ')).toMatch(/patterns/i);
+    },
+    60_000,
+  );
+
+  it(
+    'POST /redactions — PAYLOAD_TOO_LARGE when pattern count exceeds MAX_PATTERN_COUNT',
+    async () => {
+      const tooMany = Array.from(
+        { length: LIMITS.MAX_PATTERN_COUNT + 1 },
+        (_, i) => `p${String(i)}`,
+      ).join(',');
+      const res = await request(app.getHttpServer())
+        .post('/redactions')
+        .send({ text: 'hello', patterns: tooMany })
+        .expect(413);
+
+      expect(res.body).toMatchObject({
+        error: {
+          code: 'PAYLOAD_TOO_LARGE',
+          kind: 'LIMIT_EXCEEDED',
+          details: {
+            limit: 'MAX_PATTERN_COUNT',
+            max: LIMITS.MAX_PATTERN_COUNT,
+          },
+        },
+      });
+    },
+    60_000,
+  );
 });
