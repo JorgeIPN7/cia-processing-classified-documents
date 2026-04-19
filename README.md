@@ -3,7 +3,7 @@
 ![Node](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-213%20unit%20%2B%2014%20e2e-brightgreen)
+![Tests](https://img.shields.io/badge/tests-231%20unit%20%2B%2024%20e2e-brightgreen)
 
 Servicio stateless que redacta documentos de texto — inserta `XXXX` en los
 lugares donde aparecen los keywords y frases censurados — y permite
@@ -16,6 +16,17 @@ TypeScript estricto.
 | ---- | ----------------------------------------------------------------- | --------------------------- | ----------------------------------------------------- |
 | 1    | Remover keywords y frases de un texto y reemplazarlos con `XXXX`. | `POST /redactions`          | `{ text, patterns }` → `{ redactedText, key, stats }` |
 | 2    | Revertir un texto redactado usando una key.                       | `POST /redactions/unredact` | `{ redactedText, key }` → `{ text, stats }`           |
+
+### Variante por archivos (`.txt` / `.md`)
+
+Para operar directamente con documentos sin copiar-pegar texto en JSON, hay
+tres endpoints adicionales sobre `multipart/form-data`:
+
+| Endpoint                       | Método | Uso                                                                                                      |
+| ------------------------------ | ------ | -------------------------------------------------------------------------------------------------------- |
+| `POST /redactions/file`        | async  | Sube un `.txt`/`.md` → responde `{ id, downloadUrl, key, expiresInSeconds, stats }`                      |
+| `GET /redactions/file/:id`     | async  | Descarga **una sola vez** el archivo redactado (TTL 5 min). Tras leerlo, se borra del servidor.          |
+| `POST /redactions/unredact/file` | sync | Sube el `.txt`/`.md` redactado + `key` → responde el archivo restaurado inline. El original nunca toca disco. |
 
 ## Probar en 1 minuto
 
@@ -48,6 +59,34 @@ curl -s -X POST http://localhost:8888/redactions/unredact \
   -H 'Content-Type: application/json' \
   -d "{\"redactedText\": \"$REDACTED\", \"key\": \"$KEY\"}"
 ```
+
+Roundtrip equivalente usando archivos:
+
+```bash
+# 1) Redactar un archivo — devuelve id, URL de descarga y key
+echo "The Boston Red Sox ordered a Cheese Pizza." > doc.txt
+RESP=$(curl -s -X POST http://localhost:8888/redactions/file \
+  -F 'patterns="Boston Red Sox" "Cheese Pizza"' \
+  -F 'file=@doc.txt;type=text/plain')
+echo "Redactado: $RESP"
+
+# 2) Descargar el archivo redactado (single-use, TTL 5 min)
+URL=$(echo "$RESP" | jq -r .downloadUrl)
+KEY=$(echo "$RESP" | jq -r .key)
+curl -s -o doc.redacted.txt "$URL"
+
+# 3) Restaurar: sube el archivo redactado + key → baja el original
+curl -s -o doc.restored.txt -X POST http://localhost:8888/redactions/unredact/file \
+  -F "key=$KEY" \
+  -F 'file=@doc.redacted.txt;type=text/plain'
+```
+
+Restricciones de archivo: extensiones permitidas `.txt` y `.md`, tamaño máximo
+`MAX_DOCUMENT_BYTES` (10 MB por defecto), encoding UTF-8 asumido. La URL de
+descarga es absoluta y respeta `X-Forwarded-Proto` / `X-Forwarded-Host`
+detrás de proxies. Variables de entorno opcionales:
+`REDACTION_FILE_STORAGE_DIR` (default `./tmp/redactions`) y
+`REDACTION_FILE_TTL_SECONDS` (default `300`).
 
 Explorar la API interactivamente en Swagger UI:
 [http://localhost:8888/api/docs](http://localhost:8888/api/docs).
@@ -89,8 +128,8 @@ uniforme vía el `HttpExceptionFilter` global.
 | Framework            | NestJS 11 (modules, providers, pipes, filters, interceptors)                               |
 | Lenguaje             | TypeScript estricto (`strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`) |
 | Package manager      | pnpm                                                                                       |
-| Tests unitarios      | Jest — 213 tests                                                                           |
-| Tests end-to-end     | supertest contra `AppModule` real — 14 tests                                               |
+| Tests unitarios      | Jest — 231 tests                                                                           |
+| Tests end-to-end     | supertest contra `AppModule` real — 24 tests                                               |
 | Tests property-based | `fast-check` — 10 propiedades con 1000+ iteraciones cada una                               |
 | Docs de API          | OpenAPI vía `@nestjs/swagger` en `/api/docs`                                               |
 | Linting              | ESLint + `typescript-eslint` con preset `strict-type-checked`                              |
@@ -98,8 +137,8 @@ uniforme vía el `HttpExceptionFilter` global.
 Ejecutar la suite completa:
 
 ```bash
-pnpm test        # 213 unitarios
-pnpm test:e2e    # 14 end-to-end
+pnpm test        # 231 unitarios
+pnpm test:e2e    # 24 end-to-end
 pnpm test:cov    # con reporte de cobertura
 ```
 
