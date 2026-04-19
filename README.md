@@ -1,98 +1,111 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# CIA Document Redactor
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+![Node](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-213%20unit%20%2B%2014%20e2e-brightgreen)
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Servicio stateless que redacta documentos de texto — inserta `XXXX` en los
+lugares donde aparecen los keywords y frases censurados — y permite
+revertirlos al original usando una key opaca. Resuelto con NestJS 11 y
+TypeScript estricto.
 
-## Description
+## Los assignments que resuelve
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+| Part | Qué pide el enunciado                                             | Endpoint                    | Input → Output                                        |
+| ---- | ----------------------------------------------------------------- | --------------------------- | ----------------------------------------------------- |
+| 1    | Remover keywords y frases de un texto y reemplazarlos con `XXXX`. | `POST /redactions`          | `{ text, patterns }` → `{ redactedText, key, stats }` |
+| 2    | Revertir un texto redactado usando una key.                       | `POST /redactions/unredact` | `{ redactedText, key }` → `{ text, stats }`           |
 
-## Project setup
+## Probar en 1 minuto
+
+Requisitos: Node.js ≥ 22 y pnpm ≥ 9.
 
 ```bash
-$ pnpm install
+git clone <repo-url>
+cd cia-processing-classified-documents
+pnpm install
+cp .env.example .env
+pnpm run start:dev
 ```
 
-## Compile and run the project
+Roundtrip completo — redactar y revertir en una sola tirada:
 
 ```bash
-# development
-$ pnpm run start
+# 1) Redactar
+RESULT=$(curl -s -X POST http://localhost:8888/redactions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "The Boston Red Sox ordered a Cheese Pizza.",
+    "patterns": "\"Boston Red Sox\" \"Cheese Pizza\""
+  }')
+echo "Redactado: $RESULT"
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+# 2) Revertir con la key devuelta
+KEY=$(echo "$RESULT" | jq -r .key)
+REDACTED=$(echo "$RESULT" | jq -r .redactedText)
+curl -s -X POST http://localhost:8888/redactions/unredact \
+  -H 'Content-Type: application/json' \
+  -d "{\"redactedText\": \"$REDACTED\", \"key\": \"$KEY\"}"
 ```
 
-## Run tests
+Explorar la API interactivamente en Swagger UI:
+[http://localhost:8888/api/docs](http://localhost:8888/api/docs).
+
+Una request pasa por validación de DTO, llega al controlador, que orquesta
+parser + matcher + serializador de key dentro del `RedactionService`, y
+regresa al cliente. Cualquier error de dominio se convierte en un envelope
+uniforme vía el `HttpExceptionFilter` global.
+
+## Decisiones técnicas destacadas
+
+- **Aho-Corasick como algoritmo de matching.** Un solo recorrido del texto
+  en `O(n + m + Z)` sin importar cuántos patrones haya en la lista —
+  determinista, sin backtracking, auditable. Ver el deep dive en
+  [docs/ALGORITHM.md](docs/ALGORITHM.md).
+
+- **Property-based testing con `fast-check`.** Se cruzan las
+  implementaciones `AhoCorasickMatcher` y `RegexMatcher` contra 1000+ inputs
+  generados aleatoriamente y se afirma que producen el mismo resultado.
+  Ninguno es el oráculo; el acuerdo entre dos implementaciones
+  independientes es la evidencia. Ver
+  [docs/DECISIONS.md — Pruebas basadas en propiedades](docs/DECISIONS.md).
+
+- **Tipos branded en TypeScript.** `Pattern`, `RedactionKey`, `RedactedText`
+  y `OriginalText` son tipos distintos aunque por debajo sean `string`. El
+  compilador rechaza confundir, por ejemplo, una `RedactionKey` con un
+  `RedactedText` — bug invisible con `string` plano. Ver
+  [docs/DECISIONS.md — Tipos branded](docs/DECISIONS.md).
+
+- **Key autocontenida (JSON + gzip + base64url).** El "recibo" de todos los
+  reemplazos viaja en la respuesta y se reenvía tal cual al endpoint de
+  reversión. El servidor no guarda nada — sin base de datos, sin estado.
+  Ver [docs/DECISIONS.md — Key autocontenida](docs/DECISIONS.md).
+
+## Stack y testing
+
+| Área                 | Elección                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| Framework            | NestJS 11 (modules, providers, pipes, filters, interceptors)                               |
+| Lenguaje             | TypeScript estricto (`strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`) |
+| Package manager      | pnpm                                                                                       |
+| Tests unitarios      | Jest — 213 tests                                                                           |
+| Tests end-to-end     | supertest contra `AppModule` real — 14 tests                                               |
+| Tests property-based | `fast-check` — 10 propiedades con 1000+ iteraciones cada una                               |
+| Docs de API          | OpenAPI vía `@nestjs/swagger` en `/api/docs`                                               |
+| Linting              | ESLint + `typescript-eslint` con preset `strict-type-checked`                              |
+
+Ejecutar la suite completa:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm test        # 213 unitarios
+pnpm test:e2e    # 14 end-to-end
+pnpm test:cov    # con reporte de cobertura
 ```
 
-## Deployment
+## Documentación profunda
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+| Documento                              | Contenido                                                                                                            |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Cada decisión de diseño con alternativas consideradas, por qué se rechazaron, y huella en el código.                 |
+| [docs/ALGORITHM.md](docs/ALGORITHM.md) | Aho-Corasick: intuición, complejidad formal, comparación con 5 alternativas, diagrama del trie con enlaces de fallo. |
